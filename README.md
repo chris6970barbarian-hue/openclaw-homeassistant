@@ -1,125 +1,134 @@
 # Home Assistant CLI for OpenClaw
 
-A Home Assistant skill for OpenClaw that allows controlling smart home devices via the Home Assistant API.
+A streamlined Home Assistant CLI for OpenClaw with one-command setup and natural language control.
 
 ## Features
 
-- **Lights**: on/off, brightness, RGB color
-- **Switches**: on/off
-- **Covers**: open/close/stop (blinds, garage doors)
-- **Climate**: temperature, HVAC mode
-- **Scenes**: activate any scene
-- **Scripts**: run any script
-- **Entity Discovery**: list all devices
-- **History**: query sensor history
-- **Custom Services**: call any HA service
+- **One-command setup**: `ha-cli setup <url> <token>`
+- **Natural commands**: `ha-cli on living room` or `ha-cli living room on`
+- **Smart fuzzy matching**: "bed" finds "Bedroom Light", "Bedroom AC"
+- **Auto-config save**: Credentials stored in config.json
+- **Any device type**: Lights, switches, covers, climate, locks, scenes, scripts
 
-## Requirements
-
-- Node.js 18+
-- Home Assistant with Long-Lived Access Token
-
-## Installation
+## Quick Start
 
 ```bash
-# Clone or copy to your OpenClaw skills folder
-cp -r homeassistant ~/.openclaw/workspace/skills/
+# One-command setup
+ha-cli setup 192.168.1.100 your_long_lived_token
+
+# Control devices
+ha-cli on living room
+ha-cli off bedroom light
+ha-cli 22 thermostat
+ha-cli scene movie
+
+# Check status
+ha-cli status
+ha-cli list light
 ```
 
-## Configuration
+## Setup
 
-Set environment variables:
-
-```bash
-export HA_URL="http://homeassistant.local:8123"
-export HA_TOKEN="your_long_lived_access_token"
-```
-
-### Get Long-Lived Access Token
+### 1. Get Long-Lived Access Token
 
 1. Open Home Assistant Web UI
 2. Click your username (Profile)
 3. Scroll to "Long-Lived Access Tokens"
 4. Click "Create Token"
-5. Name it (e.g., "OpenClaw")
-6. Copy the token (shown once!)
+5. Copy the token
 
-## Usage
+### 2. Configure
 
 ```bash
-# Status & Discovery
-ha-cli discover              # Find HA on network
-ha-cli status               # Get HA status & entity count
-ha-cli entities             # List all entities
-ha-cli entities --domain light  
-
-# Lights
- # Filter by domainha-cli light on "Living Room"
-ha-cli light off "Bedroom"
-ha-cli light brightness 75 "Kitchen"
-ha-cli light rgb "#FF5500" "Desk Lamp"
-
-# Switches
-ha-cli switch on "TV Plug"
-ha-cli switch off "Garage"
-
-# Covers
-ha-cli cover open "Bedroom Blinds"
-ha-cli cover close "Living Room Curtains"
-ha-cli cover stop "All Blinds"
-
-# Climate
-ha-cli climate set 22 "Thermostat"
-ha-cli climate mode auto "AC"
-ha-cli climate off "Heater"
-
-# Scenes & Scripts
-ha-cli scene activate "Movie Mode"
-ha-cli script run "Morning Routine"
-
-# Advanced
-ha-cli service call light.turn_on entity_id="light.living" brightness=255
-ha-cli history "sensor.temperature" --hours 24
-ha-cli event fire "my_event" '{"key": "value"}'
+# Replace with your HA IP and token
+ha-cli setup 192.168.1.100 your_token_here
 ```
 
-## Running from OpenClaw
+That's it! Configuration is saved automatically.
 
-The skill integrates with OpenClaw's tool system. Use the `exec` tool:
+## Commands
+
+### Basic Control
 
 ```bash
-# Set environment in your command
-HA_URL="http://ha:8123" HA_TOKEN="xxx" ha-cli light on "Living Room"
+# Turn on/off (works with any device)
+ha-cli on living room
+ha-cli off bedroom light
+ha-cli open garage
+ha-cli close blinds
+ha-cli lock front door
+
+# Alternative: name first
+ha-cli living room on
+ha-cli bedroom light off
 ```
 
-Or configure in your shell profile (~/.bashrc):
+### Brightness & Color
 
 ```bash
-export HA_URL="http://homeassistant.local:8123"
-export HA_TOKEN="your_token_here"
+ha-cli brightness 75 living room
+ha-cli rgb #FF5500 desk lamp
+```
+
+### Temperature
+
+```bash
+ha-cli 22 thermostat
+ha-cli temperature 24 bedroom
+```
+
+### Scenes & Scripts
+
+```bash
+ha-cli scene movie
+ha-cli scene good morning
+ha-cli script morning
+```
+
+### Status
+
+```bash
+ha-cli status           # HA status overview
+ha-cli list             # All entities
+ha-cli list light       # Only lights
+ha-cli list switch      # Only switches
+```
+
+## Examples
+
+```bash
+# Morning routine
+ha-cli scene good morning
+ha-cli script morning_routine
+
+# Movie time
+ha-cli scene movie
+ha-cli brightness 20 living room
+
+# Goodnight
+ha-cli off everywhere
+ha-cli lock front door
 ```
 
 ## Supported Domains
 
-- `light` - On/Off, brightness, RGB, color temp
-- `switch` - On/Off
-- `cover` - Open/close/stop, position
-- `climate` - Temperature, mode
-- `fan` - On/Off, speed
+- `light` - On/off, brightness, RGB
+- `switch` - On/off
+- `cover` - Open/close/stop
+- `climate` - Temperature
 - `lock` - Lock/unlock
-- `media_player` - Play/pause, volume
+- `fan` - On/off
 - `scene` - Activate
 - `script` - Run
-- `input_boolean`, `input_number`, `input_select`
 
 ## Files
 
 ```
 homeassistant/
-├── SKILL.md      # OpenClaw skill documentation
+├── SKILL.md      # OpenClaw skill docs
 ├── ha-cli        # Main CLI (Node.js)
 ├── ha            # Bash wrapper
-└── config.json   # Config template
+└── config.json   # Saved config
 ```
 
 ## License

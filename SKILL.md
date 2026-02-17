@@ -1,124 +1,129 @@
 # Home Assistant Skill
 
-Control smart home devices via Home Assistant API.
+Control smart home devices via Home Assistant API. Optimized for one-command setup and natural language.
 
-## Setup
+## Quick Start
 
-### Configuration (Environment Variables)
-
-Set these in your environment or ask user to configure:
+### One-Command Setup
 
 ```bash
-# Required
-export HA_URL="http://homeassistant.local:8123"
-export HA_TOKEN="your_long_lived_access_token"
-
-# Optional (for local discovery)
-export HA_USE_WS=true
+ha-cli setup <url> <token>
 ```
 
-### Get Long-Lived Access Token
+Example:
+```bash
+ha-cli setup 192.168.1.100 your_long_lived_token
+# or
+ha-cli setup http://homeassistant.local:8123 your_token
+```
 
-1. Open Home Assistant UI
-2. Go to Profile (click your username)
-3. Scroll down to "Long-Lived Access Tokens"
+That's it! Configuration is saved automatically.
+
+## Get Your Token
+
+1. Open Home Assistant Web UI
+2. Click your username (Profile)
+3. Scroll to "Long-Lived Access Tokens"
 4. Click "Create Token"
-5. Name it (e.g., "OpenClaw")
-6. Copy the token (only shown once!)
+5. Copy the token (shown once!)
 
-## Usage
+## Usage - Natural Commands
 
-### Discovery & Status
-
-```bash
-# Discover HA instance on network
-ha-cli discover
-
-# Check connection and get system info
-ha-cli status
-
-# Get all entities
-ha-cli entities
-
-# Get entities by domain
-ha-cli entities --domain light
-ha-cli entities --domain switch
-ha-cli entities --domain climate
-ha-cli entities --domain cover
-ha-cli entities --domain sensor
-ha-cli entities --domain binary_sensor
-```
-
-### Control Devices
+### Basic Control
 
 ```bash
-# Lights
-ha-cli light on "Living Room Lights"
-ha-cli light off "Bedroom Light"
-ha-cli light brightness 75 "Kitchen Light"
-ha-cli light rgb "#FF5500" "Desk Lamp"
+# Turn on/off (any device type)
+ha-cli on living room
+ha-cli off bedroom light
+ha-cli open garage door
+ha-cli close blinds
 
-# Switches
-ha-cli switch on "Garage Door"
-ha-cli switch off "TV Plug"
-
-# Covers (Blinds/Doors)
-ha-cli cover open "Bedroom Blinds"
-ha-cli cover close "Living Room Curtains"
-ha-cli cover stop "All Blinds"
-
-# Climate
-ha-cli climate set 22 "Thermostat"
-ha-cli climate mode "auto" "Upstairs AC"
-ha-cli climate off "Heater"
-
-# Scenes
-ha-cli scene activate "Movie Mode"
-ha-cli scene activate "Good Morning"
-
-# Scripts
-ha-cli script run "Morning Routine"
+# Alternative syntax (name + action)
+ha-cli living room on
+ha-cli bedroom light off
 ```
 
-### Advanced
+### Brightness & Color
+
+```bash
+ha-cli brightness 75 living room
+ha-cli brightness 50 kitchen
+ha-cli rgb #FF5500 desk lamp
+```
+
+### Temperature
+
+```bash
+ha-cli 22 thermostat
+ha-cli temperature 24 bedroom
+```
+
+### Scenes & Scripts
+
+```bash
+ha-cli scene movie
+ha-cli scene good morning
+ha-cli script morning
+ha-cli run cleanup
+```
+
+### Status & Discovery
+
+```bash
+ha-cli status           # Show HA status
+ha-cli list             # List all entities
+ha-cli list light       # List only lights
+ha-cli list switch     # List only switches
+```
+
+### Get Entity State
+
+```bash
+ha-cli living room      # Show state of entity
+```
+
+## Smart Features
+
+- **Fuzzy matching**: "living" matches "Living Room Lights"
+- **Auto-discovery**: First-time setup tries common addresses
+- **Partial names**: "bed" finds "Bedroom Light", "Bedroom AC", etc.
+- **Smart suggestions**: Shows close matches if entity not found
+
+## Configuration
+
+Configuration is saved to `config.json` in the skill folder:
+
+```json
+{
+  "url": "http://192.168.1.100:8123",
+  "token": "your_token_here"
+}
+```
+
+Or use environment variables:
+
+```bash
+export HA_URL="http://homeassistant.local:8123"
+export HA_TOKEN="your_token"
+```
+
+## Advanced
 
 ```bash
 # Call any HA service
-ha-cli service call light.turn_on entity_id="light.living_room" brightness=255
+ha-cli call light.turn_on "living room"
 
-# Get history for entity
-ha-cli history "sensor.temperature" --hours 24
-
-# Fire an event
-ha-cli event fire "my_custom_event" '{"key": "value"}'
+# Show all commands
+ha-cli help
 ```
 
-## Supported Domains
+## Supported Devices
 
-- `light` - On/Off, brightness, RGB, color temperature
-- `switch` - On/Off
-- `cover` - Open/close/stop, position
-- `climate` - Temperature, mode, off
-- `fan` - On/Off, speed, oscillation
-- `lock` - Lock/unlock
-- `alarm_control_panel` - Arm/disarm
-- `media_player` - Play/pause, volume, source
-- `vacuum` - Start/stop/return_to_base
-- `water_heater` - Temperature, mode
-- `scene` - Activate
-- `script` - Run
-- `input_boolean` - On/Off
-- `input_number` - Set value
-- `input_select` - Select option
-
-## Entity Matching
-
-- Entity ID or friendly name works
-- Case-insensitive partial matching
-- Use quotes for names with spaces
-
-## Error Handling
-
-- Connection errors show helpful message
-- Invalid entity shows closest matches
-- Token errors indicate how to fix
+- Lights (on/off, brightness, RGB)
+- Switches
+- Covers (blinds, garage doors)
+- Climate (temperature)
+- Locks
+- Scenes
+- Scripts
+- Any HA entity
