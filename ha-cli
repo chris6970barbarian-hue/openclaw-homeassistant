@@ -1,0 +1,553 @@
+#!/usr/bin/env node
+
+/**
+ * Home Assistant CLI
+ * Control smart home devices via Home Assistant API
+ */
+
+const http = require('http');
+const https = require('https');
+const { URL } = require('url');
+
+// Configuration
+const HA_URL = process.env.HA_URL || 'http://homeassistant.local:8123';
+const HA_TOKEN = process.env.HA_TOKEN;
+const HA_USE_WS = process.env.HA_USE_WS === 'true';
+
+// Colors for output
+const colors = {
+  reset: '\x1b[0m',
+  bright: '\x1b[1m',
+  green: '\x1b[32m',
+  red: '\x1b[31m',
+  yellow: '\x1b[33m',
+  cyan: '\x1b[36m',
+  gray: '\x1b[90m'
+};
+
+function log(msg, color = 'reset') {
+  console.log(`${colors[color]}${msg}${colors.reset}`);
+}
+
+function error(msg) {
+  console.error(`${colors.red}Error:${colors.reset} ${msg}`);
+}
+
+// HTTP Request helper
+function haRequest(method, path, body = null) {
+  return new Promise((resolve, reject) => {
+    if (!HA_TOKEN) {
+      reject(new Error('HA_TOKEN not set. Set environment variable HA_TOKEN or add to config.'));
+      return;
+    }
+
+    const url = new URL(path, HA_URL);
+    const isHttps = url.protocol === 'https:';
+    const client = isHttps ? https : http;
+
+    const options = {
+      hostname: url.hostname,
+      port: url.port || (isHttps ? 443 : 8123),
+      path: url.pathname + url.search,
+      method: method,
+      headers: {
+        'Authorization': `Bearer ${HA_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 10000
+    };
+
+    const req = client.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = data ? JSON.parse(data) : {};
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(parsed);
+          } else {
+            reject(new Error(`HTTP ${res.statusCode}: ${parsed.message || data}`));
+          }
+        } catch (e) {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(data);
+          } else {
+            reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+          }
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => reject(new Error('Request timeout')));
+
+    if (body) {
+      req.write(JSON.stringify(body));
+    }
+    req.end();
+  });
+}
+
+// Discover HA on network
+async function discover() {
+  log('Discovering Home Assistant on network...', 'cyan');
+  
+  const ips = [];
+  // Common IP ranges
+  for (let i = 1; i <= 254; i++) {
+    ips.push(`192.168.1.${i}`);
+    ips.push(`192.168.0.${i}`);
+    ips.push(`10.0.0.${i}`);
+    ips.push(`10.0.1.${i}`);
+  }
+
+  const found = [];
+  const checks = ips.map(async (ip) => {
+    try {
+      const url = new URL('/api/', `http://${ip}:8123`);
+      const response = await haRequest('GET', url.pathname).catch(() => null);
+      if (response && response.message) {
+        found.push(ip);
+      }
+    } catch (e) {
+      // Ignore errors
+    }
+  });
+
+  await Promise.all(checks);
+  
+  if (found.length > 0) {
+    log(`Found Home Assistant at: ${found.join(', ')}`, 'green');
+    log(`Set HA_URL=http://${found[0]}:8123 to configure`, 'yellow');
+  } else {
+    log('No Home Assistant found. Make sure HA is running and accessible.', 'yellow');
+    log('Or set HA_URL manually: export HA_URL="http://your-ha:8123"', 'gray');
+  }
+  
+  return found;
+}
+
+// Get HA status
+async function status() {
+  log('Fetching Home Assistant status...', 'cyan');
+  
+  try {
+    const config = await haRequest('GET', '/api/config');
+    const states = await haRequest('GET', '/api/states');
+    
+    log(`\n${colors.bright}Home Assistant Status${colors.reset}`, 'green');
+    log(`  Version: ${config.version}`);
+    log(`  Location: ${config.location_name}`);
+    log(`  Components: ${config.components?.length || 'N/A'}`);
+    log(`  Entities: ${states.length}`);
+    
+    // Count by domain
+    const domains = {};
+    states.forEach(s => {
+      const domain = s.entity_id.split('.')[0];
+      domains[domain] = (domains[domain] || 0) + 1;
+    });
+    
+    log(`\n${colors.bright}Domains:${colors.reset}`);
+    Object.entries(domains).sort((a, b) => b[1] - a[1]).forEach(([d, c]) => {
+      log(`  ${d}: ${c}`);
+    });
+    
+    return config;
+  } catch (e) {
+    error(e.message);
+    error('\nMake sure HA_URL and HA_TOKEN are set correctly.');
+    error('Example: export HA_URL="http://homeassistant.local:8123"');
+    error('        export HA_TOKEN="your_long_lived_access_token"');
+    process.exit(1);
+  }
+}
+
+// Get all entities or filter by domain
+async function getEntities(domain = null) {
+  const states = await haRequest('GET', '/api/states');
+  
+  if (domain) {
+    const filtered = states.filter(s => s.entity_id.startsWith(domain + '.'));
+    return filtered;
+  }
+  
+  return states;
+}
+
+// Find entity by name or ID
+async function findEntity(name) {
+  const states = await haRequest('GET', '/api/states');
+  const search = name.toLowerCase();
+  
+  // Exact match first
+  let entity = states.find(s => s.entity_id.toLowerCase() === search);
+  if (entity) return entity;
+  
+  // Friendly name match
+  entity = states.find(s => 
+    s.attributes.friendly_name && 
+    s.attributes.friendly_name.toLowerCase() === search
+  );
+  if (entity) return entity;
+  
+  // Partial match
+  const matches = states.filter(s => 
+    s.entity_id.toLowerCase().includes(search) ||
+    (s.attributes.friendly_name && s.attributes.friendly_name.toLowerCase().includes(search))
+  );
+  
+  if (matches.length === 0) {
+    throw new Error(`Entity not found: ${name}`);
+  }
+  
+  if (matches.length > 1) {
+    log(`Multiple matches for "${name}":`, 'yellow');
+    matches.forEach(m => log(`  - ${m.entity_id} (${m.attributes.friendly_name || 'no name'})`, 'gray'));
+    throw new Error('Multiple matches found. Use entity_id for specificity.');
+  }
+  
+  return matches[0];
+}
+
+// Light control
+async function lightControl(action, name, extra = {}) {
+  const entity = await findEntity(name);
+  const domain = entity.entity_id.split('.')[0];
+  
+  if (domain !== 'light') {
+    throw new Error(`Entity ${name} is not a light (${domain})`);
+  }
+  
+  let serviceData = { entity_id: entity.entity_id };
+  
+  switch (action) {
+    case 'on':
+      serviceData = { ...serviceData, ...extra };
+      break;
+    case 'off':
+      break;
+    case 'brightness':
+      serviceData = { ...serviceData, brightness: Math.round((extra.brightness / 100) * 255), ...extra };
+      break;
+    case 'rgb':
+      if (extra.color) {
+        const hex = extra.color.replace('#', '');
+        serviceData.rgb_color = [
+          parseInt(hex.substring(0, 2), 16),
+          parseInt(hex.substring(2, 4), 16),
+          parseInt(hex.substring(4, 6), 16)
+        ];
+      }
+      break;
+    default:
+      throw new Error(`Unknown light action: ${action}`);
+  }
+  
+  const result = await haRequest('POST', `/api/services/light/${action}`, serviceData);
+  log(`Light ${action}: ${entity.attributes.friendly_name || entity.entity_id}`, 'green');
+  return result;
+}
+
+// Switch control
+async function switchControl(action, name) {
+  const entity = await findEntity(name);
+  
+  if (!entity.entity_id.startsWith('switch.')) {
+    throw new Error(`Entity ${name} is not a switch`);
+  }
+  
+  const result = await haRequest('POST', `/api/services/switch/${action}`, {
+    entity_id: entity.entity_id
+  });
+  log(`Switch ${action}: ${entity.attributes.friendly_name || entity.entity_id}`, 'green');
+  return result;
+}
+
+// Cover control
+async function coverControl(action, name) {
+  const entity = await findEntity(name);
+  
+  if (!entity.entity_id.startsWith('cover.')) {
+    throw new Error(`Entity ${name} is not a cover`);
+  }
+  
+  const result = await haRequest('POST', `/api/services/cover/${action}`, {
+    entity_id: entity.entity_id
+  });
+  log(`Cover ${action}: ${entity.attributes.friendly_name || entity.entity_id}`, 'green');
+  return result;
+}
+
+// Climate control
+async function climateControl(action, value, name) {
+  const entity = await findEntity(name);
+  
+  if (!entity.entity_id.startsWith('climate.')) {
+    throw new Error(`Entity ${name} is not a climate device`);
+  }
+  
+  let serviceData = { entity_id: entity.entity_id };
+  
+  if (action === 'set') {
+    serviceData.temperature = parseFloat(value);
+  } else if (action === 'mode') {
+    serviceData.hvac_mode = value;
+  }
+  
+  const service = action === 'mode' ? 'set_hvac_mode' : 'set_temperature';
+  const result = await haRequest(`POST`, `/api/services/climate/${service}`, serviceData);
+  log(`Climate ${action} ${value}: ${entity.attributes.friendly_name || entity.entity_id}`, 'green');
+  return result;
+}
+
+// Scene activation
+async function activateScene(sceneName) {
+  const states = await haRequest('GET', '/api/states');
+  const scene = states.find(s => 
+    s.entity_id.startsWith('scene.') && 
+    (s.entity_id.includes(sceneName.toLowerCase().replace(/\s+/g, '_')) ||
+     s.attributes.friendly_name?.toLowerCase().includes(sceneName.toLowerCase()))
+  );
+  
+  if (!scene) {
+    throw new Error(`Scene not found: ${sceneName}`);
+  }
+  
+  const result = await haRequest('POST', `/api/services/scene/turn_on`, {
+    entity_id: scene.entity_id
+  });
+  log(`Scene activated: ${scene.attributes.friendly_name || scene.entity_id}`, 'green');
+  return result;
+}
+
+// Script run
+async function runScript(scriptName) {
+  const states = await haRequest('GET', '/api/states');
+  const script = states.find(s => 
+    s.entity_id.startsWith('script.') && 
+    (s.entity_id.includes(scriptName.toLowerCase().replace(/\s+/g, '_')) ||
+     s.attributes.friendly_name?.toLowerCase().includes(scriptName.toLowerCase()))
+  );
+  
+  if (!script) {
+    throw new Error(`Script not found: ${scriptName}`);
+  }
+  
+  const result = await haRequest('POST', `/api/services/script/turn_on`, {
+    entity_id: script.entity_id
+  });
+  log(`Script started: ${script.attributes.friendly_name || script.entity_id}`, 'green');
+  return result;
+}
+
+// Call any service
+async function callService(domain, service, data) {
+  const serviceData = data ? JSON.parse(data) : {};
+  const result = await haRequest('POST', `/api/services/${domain}/${service}`, serviceData);
+  log(`Service called: ${domain}.${service}`, 'green');
+  return result;
+}
+
+// Get history
+async function getHistory(entityId, hours = 24) {
+  const endTime = new Date().toISOString();
+  const startTime = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  
+  const result = await haRequest('GET', `/api/history/period/${startTime}?filter_entity_id=${entityId}&end_time=${endTime}`);
+  
+  if (result && result.length > 0) {
+    log(`History for ${entityId}:`, 'cyan');
+    result[0].forEach(state => {
+      log(`  ${state.last_changed}: ${state.state}`, 'gray');
+    });
+  } else {
+    log('No history found', 'yellow');
+  }
+  
+  return result;
+}
+
+// Fire event
+async function fireEvent(eventType, eventData) {
+  const data = eventData ? JSON.parse(eventData) : {};
+  const result = await haRequest('POST', `/api/events/${eventType}`, data);
+  log(`Event fired: ${eventType}`, 'green');
+  return result;
+}
+
+// Parse command line arguments
+function parseArgs() {
+  const args = process.argv.slice(2);
+  const command = args[0];
+  
+  switch (command) {
+    case 'discover':
+      return { action: 'discover' };
+    
+    case 'status':
+      return { action: 'status' };
+    
+    case 'entities':
+      const domainIdx = args.indexOf('--domain');
+      const domain = domainIdx > -1 ? args[domainIdx + 1] : null;
+      return { action: 'entities', domain };
+    
+    case 'light':
+      const lightAction = args[1];
+      const lightName = args.slice(2).join(' ');
+      let lightExtra = {};
+      
+      if (lightAction === 'brightness' && args[2]) {
+        lightExtra.brightness = parseInt(args[2]);
+        return { action: 'light', subAction: 'on', name: args.slice(3).join(' '), extra: lightExtra };
+      } else if (lightAction === 'rgb' && args[2]) {
+        return { action: 'light', subAction: 'on', name: args.slice(3).join(' '), extra: { color: args[2] } };
+      }
+      
+      return { action: 'light', subAction: lightAction, name: lightName, extra: lightExtra };
+    
+    case 'switch':
+      return { action: 'switch', subAction: args[1], name: args.slice(2).join(' ') };
+    
+    case 'cover':
+      return { action: 'cover', subAction: args[1], name: args.slice(2).join(' ') };
+    
+    case 'climate':
+      if (args[1] === 'set') {
+        return { action: 'climate', subAction: 'set', value: args[2], name: args.slice(3).join(' ') };
+      } else if (args[1] === 'mode') {
+        return { action: 'climate', subAction: 'mode', value: args[2], name: args.slice(3).join(' ') };
+      } else if (args[1] === 'off') {
+        return { action: 'climate', subAction: 'mode', value: 'off', name: args.slice(2).join(' ') };
+      }
+      break;
+    
+    case 'scene':
+      if (args[1] === 'activate') {
+        return { action: 'scene', name: args.slice(2).join(' ') };
+      }
+      break;
+    
+    case 'script':
+      if (args[1] === 'run') {
+        return { action: 'script', name: args.slice(2).join(' ') };
+      }
+      break;
+    
+    case 'service':
+      // service call light.turn_on entity_id="light.living_room" brightness=255
+      if (args[1] === 'call' && args[2]) {
+        const [domain, service] = args[2].split('.');
+        const dataStr = args.slice(3).join(' ').replace(/(\w+)=(".*?"|\S+)/g, '{"$1": $2}');
+        return { action: 'service', domain, service, data: dataStr || null };
+      }
+      break;
+    
+    case 'history':
+      const hoursIdx = args.indexOf('--hours');
+      const hours = hoursIdx > -1 ? parseInt(args[hoursIdx + 1]) : 24;
+      return { action: 'history', entityId: args[1], hours };
+    
+    case 'event':
+      if (args[1] === 'fire') {
+        return { action: 'event', eventType: args[2], data: args.slice(3).join(' ') };
+      }
+      break;
+    
+    default:
+      log(`Home Assistant CLI`, 'cyan');
+      log(`Usage:`, 'gray');
+      log(`  ha-cli discover              - Discover HA on network`);
+      log(`  ha-cli status                - Get HA status`);
+      log(`  ha-cli entities              - List all entities`);
+      log(`  ha-cli entities --domain light - List light entities`);
+      log(`  ha-cli light on "Light Name"   - Turn on light`);
+      log(`  ha-cli light off "Light Name" - Turn off light`);
+      log(`  ha-cli light brightness 75 "Light" - Set brightness`);
+      log(`  ha-cli light rgb "#FF0000" "Light" - Set color`);
+      log(`  ha-cli switch on "Switch"    - Turn on switch`);
+      log(`  ha-cli switch off "Switch"   - Turn off switch`);
+      log(`  ha-cli cover open "Blind"    - Open cover`);
+      log(`  ha-cli cover close "Blind"   - Close cover`);
+      log(`  ha-cli cover stop "Blind"   - Stop cover`);
+      log(`  ha-cli climate set 22 "Therm" - Set temperature`);
+      log(`  ha-cli climate mode auto "AC" - Set HVAC mode`);
+      log(`  ha-cli climate off "Heater"  - Turn off climate`);
+      log(`  ha-cli scene activate "Name" - Activate scene`);
+      log(`  ha-cli script run "Name"     - Run script`);
+      log(`  ha-cli history entity_id     - Get entity history`);
+      log(`  ha-cli event fire type data  - Fire custom event`);
+      log(`\nConfiguration:`, 'yellow');
+      log(`  export HA_URL="http://ha:8123"`);
+      log(`  export HA_TOKEN="your_token"`);
+      process.exit(0);
+  }
+}
+
+// Main
+async function main() {
+  try {
+    const cmd = parseArgs();
+    
+    switch (cmd.action) {
+      case 'discover':
+        await discover();
+        break;
+        
+      case 'status':
+        await status();
+        break;
+        
+      case 'entities':
+        const entities = await getEntities(cmd.domain);
+        entities.forEach(e => {
+          const name = e.attributes.friendly_name || e.entity_id;
+          const state = e.state;
+          log(`${e.entity_id}: ${state} (${name})`, state === 'on' ? 'green' : 'gray');
+        });
+        break;
+        
+      case 'light':
+        await lightControl(cmd.subAction, cmd.name, cmd.extra);
+        break;
+        
+      case 'switch':
+        await switchControl(cmd.subAction, cmd.name);
+        break;
+        
+      case 'cover':
+        await coverControl(cmd.subAction, cmd.name);
+        break;
+        
+      case 'climate':
+        await climateControl(cmd.subAction, cmd.value, cmd.name);
+        break;
+        
+      case 'scene':
+        await activateScene(cmd.name);
+        break;
+        
+      case 'script':
+        await runScript(cmd.name);
+        break;
+        
+      case 'service':
+        await callService(cmd.domain, cmd.service, cmd.data);
+        break;
+        
+      case 'history':
+        await getHistory(cmd.entityId, cmd.hours);
+        break;
+        
+      case 'event':
+        await fireEvent(cmd.eventType, cmd.data);
+        break;
+    }
+  } catch (e) {
+    error(e.message);
+    process.exit(1);
+  }
+}
+
+main();
