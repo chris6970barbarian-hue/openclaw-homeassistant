@@ -1,129 +1,137 @@
 # Home Assistant Skill
 
-Control smart home devices via Home Assistant API. Optimized for one-command setup and natural language.
+Control smart home devices via Home Assistant API.
 
-## Quick Start
+## Skill Metadata
 
-### One-Command Setup
+- **Name**: homeassistant
+- **Type**: OpenClaw Skill
+- **Purpose**: Control lights, switches, covers, climate, scenes, scripts via HA API
+
+## Setup Commands
+
+### Prerequisites
+
+1. Home Assistant running on local network
+2. Long-Lived Access Token from HA Profile page
+
+### Configuration (One-Command)
 
 ```bash
-ha-cli setup <url> <token>
+# Run this to configure
+ha-cli setup <HA_URL> <TOKEN>
+
+# Example:
+ha-cli setup 192.168.1.100 your_long_lived_token_here
 ```
 
-Example:
+Or set environment variables:
+
 ```bash
-ha-cli setup 192.168.1.100 your_long_lived_token
-# or
-ha-cli setup http://homeassistant.local:8123 your_token
+export HA_URL="http://homeassistant.local:8123"
+export HA_TOKEN="your_token_here"
 ```
 
-That's it! Configuration is saved automatically.
-
-## Get Your Token
-
-1. Open Home Assistant Web UI
-2. Click your username (Profile)
-3. Scroll to "Long-Lived Access Tokens"
-4. Click "Create Token"
-5. Copy the token (shown once!)
-
-## Usage - Natural Commands
+## Usage Commands
 
 ### Basic Control
 
 ```bash
-# Turn on/off (any device type)
-ha-cli on living room
-ha-cli off bedroom light
-ha-cli open garage door
-ha-cli close blinds
+# Turn on device (any type)
+ha-cli on <device_name>
+ha-cli <device_name> on
 
-# Alternative syntax (name + action)
-ha-cli living room on
-ha-cli bedroom light off
+# Turn off device
+ha-cli off <device_name>
+ha-cli <device_name> off
 ```
 
 ### Brightness & Color
 
 ```bash
-ha-cli brightness 75 living room
-ha-cli brightness 50 kitchen
-ha-cli rgb #FF5500 desk lamp
+# Set brightness (0-100)
+ha-cli brightness <0-100> <device_name>
+ha-cli <device_name> brightness 75
+
+# Set RGB color
+ha-cli rgb #RRGGBB <device_name>
+ha-cli rgb #FF5500 "Living Room"
 ```
 
 ### Temperature
 
 ```bash
+# Set temperature
+ha-cli <temperature> <thermostat_name>
 ha-cli 22 thermostat
-ha-cli temperature 24 bedroom
 ```
 
 ### Scenes & Scripts
 
 ```bash
+# Activate scene
+ha-cli scene <scene_name>
 ha-cli scene movie
-ha-cli scene good morning
+
+# Run script
+ha-cli script <script_name>
 ha-cli script morning
-ha-cli run cleanup
 ```
 
 ### Status & Discovery
 
 ```bash
-ha-cli status           # Show HA status
-ha-cli list             # List all entities
-ha-cli list light       # List only lights
-ha-cli list switch     # List only switches
+# Check HA status
+ha-cli status
+ha-cli info
+
+# List all entities
+ha-cli list
+ha-cli list entities
+
+# List by domain
+ha-cli list light
+ha-cli list switch
+ha-cli list climate
 ```
 
-### Get Entity State
+## Supported Device Types
 
-```bash
-ha-cli living room      # Show state of entity
+| Domain | Commands | Examples |
+|--------|----------|----------|
+| light | on, off, brightness, rgb | `ha-cli on living room` |
+| switch | on, off | `ha-cli off tv` |
+| cover | open, close, stop | `ha-cli open blinds` |
+| climate | temperature, mode | `ha-cli 22 thermostat` |
+| lock | lock, unlock | `ha-cli lock front door` |
+| scene | activate | `ha-cli scene movie` |
+| script | run | `ha-cli script morning` |
+
+## Entity Matching
+
+- Case insensitive
+- Partial name matching (bed → Bedroom Light)
+- Fuzzy matching enabled
+
+## Error Handling
+
+- Connection error: Shows HA URL and token setup instructions
+- Entity not found: Shows similar entity suggestions
+- Invalid command: Shows usage help
+
+## Related Skills
+
+- openhue (Philips Hue)
+- sonoscli (Sonos speakers)
+- eightctl (Eight Sleep)
+
+## Files
+
 ```
-
-## Smart Features
-
-- **Fuzzy matching**: "living" matches "Living Room Lights"
-- **Auto-discovery**: First-time setup tries common addresses
-- **Partial names**: "bed" finds "Bedroom Light", "Bedroom AC", etc.
-- **Smart suggestions**: Shows close matches if entity not found
-
-## Configuration
-
-Configuration is saved to `config.json` in the skill folder:
-
-```json
-{
-  "url": "http://192.168.1.100:8123",
-  "token": "your_token_here"
-}
+homeassistant/
+├── SKILL.md      # This file
+├── README.md     # User documentation
+├── ha-cli        # Main CLI executable
+├── ha            # Bash wrapper
+└── config.json   # Saved configuration
 ```
-
-Or use environment variables:
-
-```bash
-export HA_URL="http://homeassistant.local:8123"
-export HA_TOKEN="your_token"
-```
-
-## Advanced
-
-```bash
-# Call any HA service
-ha-cli call light.turn_on "living room"
-
-# Show all commands
-ha-cli help
-```
-
-## Supported Devices
-
-- Lights (on/off, brightness, RGB)
-- Switches
-- Covers (blinds, garage doors)
-- Climate (temperature)
-- Locks
-- Scenes
-- Scripts
-- Any HA entity
